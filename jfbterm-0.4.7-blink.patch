@@ -1,0 +1,136 @@
+diff -urNp jfbterm-0.4.7-7-han-3.5.org/acconfig.h jfbterm-0.4.7-7-han-3.5/acconfig.h
+--- jfbterm-0.4.7-7-han-3.5.org/acconfig.h	2013-03-04 11:38:51.922264934 +0900
++++ jfbterm-0.4.7-7-han-3.5/acconfig.h	2013-03-04 14:46:18.189056725 +0900
+@@ -67,3 +67,6 @@
+ 
+ /* Support reverse video */
+ #undef JFB_REVERSEVIDEO
++
++/* Support blinking cursor */
++#undef JFB_ENABLE_CURSOR_BLINK
+diff -urNp jfbterm-0.4.7-7-han-3.5.org/config.h.in jfbterm-0.4.7-7-han-3.5/config.h.in
+--- jfbterm-0.4.7-7-han-3.5.org/config.h.in	2013-03-04 11:38:51.922264934 +0900
++++ jfbterm-0.4.7-7-han-3.5/config.h.in	2013-03-04 14:48:39.442362324 +0900
+@@ -66,6 +66,9 @@
+ /* Supprt Dimmer (Screen blank) */
+ #undef JFB_ENABLE_DIMMER
+ 
++/* Support blinking cursor */
++#undef JFB_ENABLE_CURSOR_BLINK
++
+ /* Support reverse video */
+ #undef JFB_REVERSEVIDEO
+ 
+diff -urNp jfbterm-0.4.7-7-han-3.5.org/configure.in jfbterm-0.4.7-7-han-3.5/configure.in
+--- jfbterm-0.4.7-7-han-3.5.org/configure.in	2013-03-04 11:38:51.922264934 +0900
++++ jfbterm-0.4.7-7-han-3.5/configure.in	2013-03-04 14:46:18.189056725 +0900
+@@ -235,6 +235,15 @@ else
+ 	AC_MSG_RESULT(no)
+ fi
+ 
++AC_ARG_ENABLE(cursor-blink, [  --enable-cursor-blink   Enable blinking cursor (default=yes)],,enable_cursor_blink=yes)
++AC_MSG_CHECKING(whether to enable blinking cursor)
++if test x$enable_cursor_blink = xyes; then
++	AC_MSG_RESULT(yes)
++	AC_DEFINE(JFB_ENABLE_CURSOR_BLINK)
++else
++	AC_MSG_RESULT(no)
++fi
++
+ if test x$sysconfdir = 'x${prefix}/etc'; then
+ 	if test x$prefix = xNONE; then
+ 		AC_DEFINE_UNQUOTED(SYSCONFDIR, "/usr/local/etc")
+diff -urNp jfbterm-0.4.7-7-han-3.5.org/term.c jfbterm-0.4.7-7-han-3.5/term.c
+--- jfbterm-0.4.7-7-han-3.5.org/term.c	2013-03-04 11:38:51.922264934 +0900
++++ jfbterm-0.4.7-7-han-3.5/term.c	2013-03-04 14:46:18.189056725 +0900
+@@ -166,6 +166,9 @@ int get_shift_state(void)
+ #endif
+ 
+ #define BUF_SIZE 1024
++#ifdef JFB_ENABLE_CURSOR_BLINK
++#define BLINK_INTERVAL_USEC 400000
++#endif
+ void tterm_start(TTerm* p, const char* tn, const char* en)
+ {
+ 	struct termios ntio;
+@@ -187,6 +190,14 @@ void tterm_start(TTerm* p, const char* t
+ #  define DIMMER_TIMEOUT (3 * 60 * 10)        /* 3 min */
+ #endif
+ 
++#ifdef JFB_ENABLE_CURSOR_BLINK
++	u_int time_elapsed;
++	struct timeval ptv, ctv;
++
++	ptv.tv_sec = 0;
++	ptv.tv_usec = 0;
++#endif
++
+ 	tterm_init(p, en);
+ 	if (!tterm_get_ptytty(p)) {
+ 		die("Cannot get free pty-tty.\n");
+@@ -250,6 +261,18 @@ void tterm_start(TTerm* p, const char* t
+ 		FD_SET(0,&fds);
+ 		FD_SET(p->ptyfd,&fds);
+ 		if (p->ptyfd > max) max = p->ptyfd;
++
++#ifdef JFB_ENABLE_CURSOR_BLINK
++		if(gettimeofday(&ctv, NULL))
++			continue;
++		time_elapsed = (ctv.tv_sec - ptv.tv_sec) * 1000000
++			+ (ctv.tv_usec - ptv.tv_usec);
++		if(time_elapsed > BLINK_INTERVAL_USEC && (&(p->vterm))->active) {
++			tvterm_blink_cursor(&(p->vterm));
++			ptv = ctv;
++		}
++#endif
++
+ 		ret = select(max+1, &fds, NULL, NULL, &tv);
+                 if (ret == 0 || (ret < 0 && errno == EINTR)) {
+ #ifdef JFB_ENABLE_DIMMER
+@@ -267,6 +290,13 @@ void tterm_start(TTerm* p, const char* t
+ 			print_strerror_and_exit("select");
+ 		}
+ 		if (FD_ISSET(0, &fds)) {
++
++#ifdef JFB_ENABLE_CURSOR_BLINK
++			if(gettimeofday(&ctv, NULL))
++				continue;
++			ptv = ctv;
++#endif
++
+ 			ret = read(0, buf, BUF_SIZE);
+ #ifdef JFB_ENABLE_DIMMER
+ 			idle_time = 0;
+diff -urNp jfbterm-0.4.7-7-han-3.5.org/vterm.h jfbterm-0.4.7-7-han-3.5/vterm.h
+--- jfbterm-0.4.7-7-han-3.5.org/vterm.h	2013-03-04 11:38:51.922264934 +0900
++++ jfbterm-0.4.7-7-han-3.5/vterm.h	2013-03-04 14:46:18.189056725 +0900
+@@ -188,7 +188,9 @@ void tvterm_register_signal(TVterm* p);
+ 
+ void tvterm_show_sequence(FILE *fp, TCaps *cap, const char *en);
+ 
+-
++#ifdef JFB_ENABLE_CURSOR_BLINK
++void tvterm_blink_cursor(TVterm *p);
++#endif
+ /*
+ 
+   flagBuff:
+diff -urNp jfbterm-0.4.7-7-han-3.5.org/vtermlow.c jfbterm-0.4.7-7-han-3.5/vtermlow.c
+--- jfbterm-0.4.7-7-han-3.5.org/vtermlow.c	2013-03-04 11:38:51.922264934 +0900
++++ jfbterm-0.4.7-7-han-3.5/vtermlow.c	2013-03-04 14:58:04.055291327 +0900
+@@ -248,6 +248,15 @@ void tvterm_show_cursor(TVterm* p, TBool
+ 	}
+ }
+ 
++#ifdef JFB_ENABLE_CURSOR_BLINK
++void tvterm_blink_cursor(TVterm *p)
++{   
++	static u_int show_cursor = 0;
++	tvterm_show_cursor(p, show_cursor);
++	show_cursor = !show_cursor;
++}
++#endif
++
+ /*---------------------------------------------------------------------------*/
+ void tvterm_refresh(TVterm* p)
+ {

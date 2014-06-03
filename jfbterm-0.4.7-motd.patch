@@ -1,0 +1,26 @@
+diff -urNp jfbterm-0.4.7-7-han-3.5.org/term.c jfbterm-0.4.7-7-han-3.5/term.c
+--- jfbterm-0.4.7-7-han-3.5.org/term.c	2013-02-27 13:47:28.000000000 +0900
++++ jfbterm-0.4.7-7-han-3.5/term.c	2013-02-27 13:50:19.000000000 +0900
+@@ -221,6 +221,22 @@ void tterm_start(TTerm* p, const char* t
+ 	signal(SIGCHLD, sigchld);
+ 	atexit(application_final);
+ 
++	/* Start Motd by YoungJoo.Kim <http://superlinuxer.com> */
++	FILE *FP;
++	char *motd_filename;
++	motd_filename = tcaps_find_first(&(gApp.gCaps), "ext.startup.message");
++
++	FP = fopen(motd_filename, "r");
++	if (FP) {
++		while (fgets(buf, sizeof(buf), FP) != NULL) {
++			tvterm_emulate(&(p->vterm), buf, strlen(buf));
++			p->vterm.pen.x -= strlen(buf) - 1;
++			tvterm_refresh(&(p->vterm));
++		}
++		fclose(FP);
++	}
++	/* End Motd */
++
+ 	/* not available
+ 	 * VtInit();
+ 	 * VtStart();
